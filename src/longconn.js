@@ -61,6 +61,25 @@ export function stripMention(content) {
 }
 
 /**
+ * WeCom already transcribes voice messages before delivering them (voice is
+ * only supported in 1:1 chats), but the transcript has appeared under a few
+ * different field names across callback versions. Probe them in order rather
+ * than guessing a single one.
+ */
+const VOICE_TEXT_FIELDS = ['content', 'text', 'recognition', 'voice_text', 'asr_text'];
+
+export function extractMessageText(body = {}) {
+  if (body.msgtype === 'text') return stripMention(body.text?.content);
+  if (body.msgtype !== 'voice') return '';
+  const voice = body.voice ?? {};
+  for (const field of VOICE_TEXT_FIELDS) {
+    const value = voice[field];
+    if (typeof value === 'string' && value.trim()) return stripMention(value);
+  }
+  return '';
+}
+
+/**
  * Responses to our own commands carry no `cmd` - they are matched by
  * headers.req_id - so only require a JSON object here.
  */

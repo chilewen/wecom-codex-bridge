@@ -19,7 +19,7 @@ import {
   verifySignature,
   unwrapCallback,
 } from '../src/wecom-crypto.js';
-import { parseXml, chunkText } from '../src/wecom.js';
+import { parseXml, chunkText, extractCallbackText } from '../src/wecom.js';
 import { discoverProjects, readCodexProjects, describeProjectSource } from '../src/projects.js';
 import { buildArgs } from '../src/codex.js';
 import { which, resolveCodexBin, CODEX_CANDIDATES } from '../src/bin-resolver.js';
@@ -27,6 +27,8 @@ import { describeAck, formatDuration } from '../src/bot.js';
 import { createLongConnTransport } from '../src/transport.js';
 import { DEFAULTS, mergeConfig } from '../src/config.js';
 import { acceptKeyFor, encodeFrame, createFrameParser, MiniWebSocket, OPCODE } from '../src/ws-client.js';
+import { extractMessageText } from '../src/longconn.js';
+import { attachLongConnBot } from '../src/longconn-bot.js';
 
 const TOKEN = 'test-token-1234567890';
 const AES_KEY = crypto.randomBytes(32).toString('base64').replace(/=+$/, '');
@@ -515,6 +517,74 @@ test('resolveCodexBin revalidates a cached path that disappeared', () => {
   } else {
     assert.throws(() => resolveCodexBin({ codex: { bin: 'codex' } }, env));
   }
+});
+
+console.log('voice messages');
+
+test('text and voice transcripts are extracted from long-connection bodies', () => {
+  assert.equal(extractMessageText({ msgtype: 'text', text: { content: '你好' } }), '你好');
+  assert.equal(extractMessageText({ msgtype: 'voice', voice: { content: '明天天气' } }), '明天天气');
+  assert.equal(extractMessageText({ msgtype: 'voice', voice: { text: '第二候选字段' } }), '第二候选字段');
+  assert.equal(extractMessageText({ msgtype: 'voice', voice: { recognition: '识别结果' } }), '识别结果');
+  assert.equal(extractMessageText({ msgtype: 'voice', voice: { content: '   ' } }), '');
+  assert.equal(extractMessageText({ msgtype: 'image', image: { url: 'x' } }), '');
+});
+
+test('callback voice messages read the Recognition field', () => {
+  assert.equal(extractCallbackText({ MsgType: 'text', Content: '你好' }), '你好');
+  assert.equal(extractCallbackText({ MsgType: 'voice', Recognition: '语音转写的文字' }), '语音转写的文字');
+  assert.equal(extractCallbackText({ MsgType: 'voice', MediaId: 'm1' }), '');
+  assert.equal(extractCallbackText({ MsgType: 'image' }), '');
+});
+
+test('a voice message reaches the bridge with its transcript', async () => {
+  const handled = [];
+  const logs = [];
+  const sent = [];
+  const client = new EventEmitter();
+  client.send = async (frame) => { sent.push(frame); return { errcode: 0 }; };
+  const bridge = { handle: async (userId, text, ctx) => { handled.push({ userId, text, ctx }); } };
+  const bot = attachLongConnBot({
+    client,
+    bridge,
+    transport: { send: async () => {} },
+    logger: { log: (line) => logs.push(line), error() {} },
+  });
+
+  await bot.onMessage({
+    headers: { req_id: 'r-voice' },
+    body: {
+      msgid: 'm-voice-1', msgtype: 'voice', chattype: 1,
+      from: { userid: 'u1' }, voice: { content: '帮我写个脚本' },
+    },
+  });
+
+  assert.equal(handled.length, 1);
+  assert.equal(handled[0].text, '帮我写个脚本');
+  assert.ok(logs.some((line) => line.includes('voice keys=')), 'voice field names should be logged');
+  assert.equal(sent.length, 0, 'no rejection message should be sent');
+});
+
+test('a voice message without a transcript gets a clear hint instead of silence', async () => {
+  const handled = [];
+  const sent = [];
+  const client = new EventEmitter();
+  client.send = async (frame) => { sent.push(frame); return { errcode: 0 }; };
+  const bot = attachLongConnBot({
+    client,
+    bridge: { handle: async (...args) => { handled.push(args); } },
+    transport: { send: async () => {} },
+    logger: { log() {}, error() {} },
+  });
+
+  await bot.onMessage({
+    headers: { req_id: 'r-voice-empty' },
+    body: { msgid: 'm-voice-2', msgtype: 'voice', chattype: 2, from: { userid: 'u1' }, voice: {} },
+  });
+
+  assert.equal(handled.length, 0);
+  assert.equal(sent.length, 1);
+  assert.match(sent[0].body.markdown.content, /单聊/);
 });
 
 console.log('ws-client (RFC 6455)');

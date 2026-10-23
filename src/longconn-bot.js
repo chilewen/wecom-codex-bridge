@@ -1,4 +1,4 @@
-import { buildMarkdownBody, buildRespondMsgFrame, stripMention } from './longconn.js';
+import { buildMarkdownBody, buildRespondMsgFrame, extractMessageText } from './longconn.js';
 
 export const DEFAULT_WELCOME = [
   '你好，我是接在 Codex 上的机器人。',
@@ -37,17 +37,30 @@ export function attachLongConnBot({ client, bridge, transport, logger = console,
       chatType: body.chattype,
       source: 'longconn',
     };
-    const text = stripMention(body.text?.content);
+    const text = extractMessageText(body);
     logger.log(`[bot] <- ${ctx.userId} (${body.chattype}/${body.msgtype}) ${JSON.stringify(text).slice(0, 120)}`);
+    if (body.msgtype === 'voice') {
+      // Logged once per voice message so a field rename upstream is easy to spot.
+      logger.log(`[bot] voice keys=${JSON.stringify(Object.keys(body.voice ?? {}))}`);
+    }
 
     if (isDuplicate(body.msgid)) return;
     if (!ctx.userId) {
       logger.error('[bot] message had no from.userid, ignored');
       return;
     }
-    if (body.msgtype !== 'text') {
+    if (body.msgtype !== 'text' && body.msgtype !== 'voice') {
       await client
-        .send(buildRespondMsgFrame({ reqId: ctx.reqId, body: buildMarkdownBody('目前只支持文字消息。') }))
+        .send(buildRespondMsgFrame({ reqId: ctx.reqId, body: buildMarkdownBody('目前只支持文字和语音消息。') }))
+        .catch(() => {});
+      return;
+    }
+    if (!text) {
+      const hint = body.msgtype === 'voice'
+        ? '语音消息没能识别出文字。语音仅支持单聊，也可以改用文字重发。'
+        : '消息内容为空，请重发一次。';
+      await client
+        .send(buildRespondMsgFrame({ reqId: ctx.reqId, body: buildMarkdownBody(hint) }))
         .catch(() => {});
       return;
     }

@@ -3,6 +3,7 @@
 把企业微信当成 Codex 的聊天入口：你在企微（个人微信里也能收到）发消息，本机调用
 `codex exec` 在指定工作目录里干活，结果以**流式打字机效果**推回企微。
 支持按用户选择项目（或「无项目」模式）、多轮续接上下文。
+支持文字和语音消息：语音由企业微信先转成文字再回调，**仅限单聊**。
 
 **零第三方依赖**，只用 Node 内置模块（Node ≥ 20），不需要 `npm install`。
 
@@ -301,7 +302,7 @@ WeCom long-connection × Codex bridge
 |---|---|
 | 连接 | `wss://openws.work.weixin.qq.com` |
 | 鉴权 | `aibot_subscribe`，body `{bot_id, secret}` |
-| 收消息 | `aibot_msg_callback` → `msgid`/`chatid`/`chattype`/`from.userid`/`msgtype` |
+| 收消息 | `aibot_msg_callback` → `msgid`/`chatid`/`chattype`/`from.userid`/`msgtype`；文字 `text.content`，语音 `voice.content` |
 | 收事件 | `aibot_event_callback` → `enter_chat`/`disconnected_event`/… |
 | 回复 | `aibot_respond_msg`，**透传回调的 `req_id`** |
 | 流式 | `msgtype:"stream"` + `stream.id` + `finish`，10 分钟内收尾 |
@@ -332,6 +333,9 @@ WeCom long-connection × Codex bridge
   会被通用的 pending 匹配分支吃掉，根本走不到 `case 'pong'`。不在匹配处清定时器，
   连接完全健康也会每 20 秒「心跳超时」重连一次，无限循环。
 - **群聊文本带着 `@机器人` 前缀**，转发给 Codex 前要剥掉。
+- **语音消息由企微先做语音识别**，回调里拿到的已经是文字（长连接 `voice.content`，
+  回调 XML 是 `Recognition`），不需要再接第三方 ASR。官方限制**语音仅支持单聊**；
+  收到的语音字段名会打一行 `[bot] voice keys=...` 日志，字段有变时一眼能看出来。
 - **markdown 上限 20480 字节**，超长回复按行边界切分，不切坏代码块。
 - **流有 10 分钟上限**，接近上限会主动收尾，剩余内容改走普通消息。注意「收尾」只是
   关掉那条流式消息，**不是结束任务**：真正跑十几分钟的任务，结果会另起一条普通消息

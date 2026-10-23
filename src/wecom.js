@@ -23,6 +23,21 @@ export function parseXml(xml) {
 }
 
 /**
+ * Callback-mode equivalent of the long-connection extractor. WeCom puts the
+ * transcript of a voice message in `Recognition`; `Content` is accepted as a
+ * fallback in case the callback shape changes.
+ */
+export function extractCallbackText(message = {}) {
+  if (message.MsgType === 'text') return String(message.Content ?? '').trim();
+  if (message.MsgType !== 'voice') return '';
+  for (const field of ['Recognition', 'VoiceText', 'Content']) {
+    const value = message[field];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return '';
+}
+
+/**
  * WeCom text messages cap at 2048 bytes; markdown at 4096. Split on character
  * boundaries so multi-byte characters are never cut in half.
  */

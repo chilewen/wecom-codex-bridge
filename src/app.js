@@ -1,7 +1,7 @@
 import { URL } from 'node:url';
 
 import { unwrapCallback } from './wecom-crypto.js';
-import { parseXml } from './wecom.js';
+import { extractCallbackText, parseXml } from './wecom.js';
 
 const MAX_BODY_BYTES = 1024 * 1024;
 const DEDUPE_TTL_MS = 10 * 60 * 1000;
@@ -109,7 +109,7 @@ export function createRequestHandler({ config, bridge, projects, logger = consol
     const message = parseXml(decrypted.message);
     const userId = message.FromUserName;
     const msgType = message.MsgType;
-    const content = message.Content ?? '';
+    const content = extractCallbackText(message);
 
     if (!userId) {
       logger.error('[wecom] message had no FromUserName, ignored');
@@ -124,8 +124,15 @@ export function createRequestHandler({ config, bridge, projects, logger = consol
 
     if (msgType === 'event') return; // enter_chat and friends need no reply
     const ctx = { userId, source: 'callback' };
-    if (msgType !== 'text') {
-      await bridge.send(ctx, '目前只支持文字消息。').catch(() => {});
+    if (msgType !== 'text' && msgType !== 'voice') {
+      await bridge.send(ctx, '目前只支持文字和语音消息。').catch(() => {});
+      return;
+    }
+    if (!content) {
+      const hint = msgType === 'voice'
+        ? '语音消息没能识别出文字。语音仅支持单聊，也可以改用文字重发。'
+        : '消息内容为空，请重发一次。';
+      await bridge.send(ctx, hint).catch(() => {});
       return;
     }
 
