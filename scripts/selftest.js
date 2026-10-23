@@ -24,6 +24,7 @@ import { discoverProjects, readCodexProjects, describeProjectSource } from '../s
 import { buildArgs } from '../src/codex.js';
 import { which, resolveCodexBin, CODEX_CANDIDATES } from '../src/bin-resolver.js';
 import { describeAck, formatDuration } from '../src/bot.js';
+import { createLongConnTransport } from '../src/transport.js';
 import { DEFAULTS, mergeConfig } from '../src/config.js';
 import { acceptKeyFor, encodeFrame, createFrameParser, MiniWebSocket, OPCODE } from '../src/ws-client.js';
 
@@ -429,6 +430,60 @@ test('resolveCodexBin survives an empty PATH (the reported ENOENT case)', () => 
   } else {
     assert.throws(() => resolveCodexBin({ codex: { bin: 'codex' } }, env), /could not find a runnable/);
   }
+});
+
+console.log('transport (WeCom stream updates)');
+
+function streamContents(frames) {
+  return frames
+    .filter((f) => f.cmd === 'aibot_respond_msg' && f.body?.msgtype === 'stream')
+    .map((f) => f.body.stream.content);
+}
+
+test('concurrent deltas never send a shorter stream snapshot', async () => {
+  const frames = [];
+  const client = { send: async (frame) => { frames.push(frame); return { errcode: 0 }; } };
+  const { openStream } = createLongConnTransport({
+    client, logger: { error() {} }, streamThrottleMs: 0,
+  });
+  const stream = openStream({ reqId: 'req-1', userId: 'u1' });
+
+  await stream.push('▶ 已收到\n\n');
+  await Promise.all(['先', '确认', '一下', '：', '腾格里', '沙漠'].map((d) => stream.push(d)));
+  await stream.finish('▶ 已收到\n\n先确认一下：腾格里沙漠的完整方案');
+
+  const contents = streamContents(frames);
+  for (let i = 1; i < contents.length; i += 1) {
+    assert.ok(contents[i].length >= contents[i - 1].length, `content shrank at update ${i}`);
+  }
+  assert.equal(contents.at(-1), '▶ 已收到\n\n先确认一下：腾格里沙漠的完整方案');
+});
+
+test('failed stream update closes the old bubble before falling back', async () => {
+  const frames = [];
+  let calls = 0;
+  const client = {
+    send: async (frame) => {
+      frames.push(frame);
+      calls += 1;
+      if (calls === 2 || calls === 3) return { errcode: 40001, errmsg: 'invalid req_id' };
+      return { errcode: 0 };
+    },
+  };
+  const { openStream } = createLongConnTransport({
+    client, logger: { error() {} }, streamThrottleMs: 0,
+  });
+  const stream = openStream({ reqId: 'req-2', userId: 'u1' });
+
+  await stream.push('ack\n\n');
+  await stream.push('正文');
+  await stream.finish('正文完整');
+
+  const streams = frames.filter((f) => f.body?.msgtype === 'stream');
+  const plains = frames.filter((f) => f.body?.msgtype === 'markdown');
+  assert.equal(streams.at(-1)?.body.stream.finish, true, 'should try to finish the bubble');
+  assert.equal(plains.length, 1, 'should fall back to one plain message');
+  assert.equal(plains[0].body.markdown.content, '正文完整');
 });
 
 test('resolveCodexBin resolves a bare name that IS on PATH', () => {

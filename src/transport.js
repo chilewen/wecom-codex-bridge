@@ -98,6 +98,10 @@ export function createLongConnTransport({
     // the result once, at the end.
     let degraded = false;
     const startedAt = Date.now();
+    // All updates go through this queue. Deltas arrive far faster than WeCom
+    // accepts them, and two concurrent updates could send a shorter snapshot
+    // after a longer one - WeCom rejects that and the bubble sticks on "...".
+    let queue = Promise.resolve();
 
     async function pushStream(content, finish) {
       const body = buildStreamBody({ streamId, content, finish });
@@ -141,6 +145,64 @@ export function createLongConnTransport({
       }
     }
 
+    /** Sends the current buffer, respecting the throttle unless finishing. */
+    async function sendLatest(final) {
+      if (finished || degraded || streamClosed) return;
+      const elapsed = Date.now() - startedAt;
+      if (!started) {
+        if (!buffer) return;
+        if (await pushStream(buffer, final)) {
+          started = true;
+          lastSentAt = Date.now();
+        }
+        return;
+      }
+      if (elapsed > streamMaxMs || byteLength(buffer) > maxContentBytes) {
+        await flushOverflow();
+        return;
+      }
+      if (!final && Date.now() - lastSentAt < streamThrottleMs) return;
+      if (await pushStream(buffer, final)) lastSentAt = Date.now();
+    }
+
+    /** Ends the turn: close the stream bubble, or fall back to a plain message. */
+    async function finalize() {
+      if (finished) return;
+      if (!started && !buffer) buffer = '(没有输出)';
+
+      // An update failed earlier, but the bubble is still open. Try to close
+      // it with the full text so the user does not see a perpetual "...".
+      if (degraded && !streamClosed) {
+        if (await pushStream(buffer, true)) {
+          finished = true;
+          return;
+        }
+      }
+
+      if (degraded || streamClosed) {
+        finished = true;
+        const chunks = await sendPlain(buffer);
+        overflowCount += Math.max(0, chunks - 1);
+        return;
+      }
+
+      if (byteLength(buffer) > maxContentBytes) {
+        await flushOverflow();
+        finished = true;
+        return;
+      }
+
+      if (await pushStream(buffer, true)) {
+        finished = true;
+        return;
+      }
+
+      // The final close failed as well: deliver the result as its own message.
+      finished = true;
+      const chunks = await sendPlain(buffer);
+      overflowCount += Math.max(0, chunks - 1);
+    }
+
     return {
       get streamId() {
         return streamId;
@@ -160,40 +222,24 @@ export function createLongConnTransport({
         buffer += delta;
         // Nothing to push to anymore; finish() delivers the whole thing.
         if (degraded || streamClosed) return;
-        const elapsed = Date.now() - startedAt;
-        if (!started) {
-          await pushStream(buffer, false);
-          started = true;
-          lastSentAt = Date.now();
-          return;
-        }
-        if (elapsed > streamMaxMs || byteLength(buffer) > maxContentBytes) {
-          await flushOverflow();
-          return;
-        }
-        if (Date.now() - lastSentAt < streamThrottleMs) return;
-        await pushStream(buffer, false);
-        lastSentAt = Date.now();
+        queue = queue
+          .then(() => sendLatest(false))
+          .catch((err) => logger.error(`[longconn] stream update crashed: ${err.message}`));
+        return queue;
       },
       async finish(finalText) {
         if (finished) return overflowCount;
-        if (finalText != null) buffer = finalText;
-        if (!started && !buffer) buffer = '(没有输出)';
-        // The stream is gone (expired / rate limited / hit the time cap). The
-        // result still matters - deliver it as its own message rather than
-        // silently returning because `finished` is already set.
-        if (degraded || streamClosed) {
-          finished = true;
-          const chunks = await sendPlain(buffer || '(没有输出)');
-          overflowCount += Math.max(0, chunks - 1);
-          return overflowCount;
+        // WeCom renders the latest full snapshot. Sending a shorter one after
+        // a longer update makes the bubble regress or the update fail, so the
+        // final text may only grow relative to what was already sent.
+        if (finalText != null) {
+          if (byteLength(finalText) >= byteLength(buffer)) buffer = finalText;
+          else if (!buffer.includes(finalText)) buffer = `${buffer}\n\n${finalText}`;
         }
-        if (byteLength(buffer) > maxContentBytes) {
-          await flushOverflow();
-          return overflowCount;
-        }
-        await pushStream(buffer || '(没有输出)', true);
-        finished = true;
+        queue = queue
+          .then(() => finalize())
+          .catch((err) => logger.error(`[longconn] stream finish crashed: ${err.message}`));
+        await queue;
         return overflowCount;
       },
     };

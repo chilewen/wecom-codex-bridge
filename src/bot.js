@@ -275,7 +275,13 @@ export class Bridge {
     // A run can take many minutes. Without this the chat is silent and the log
     // says nothing, so "is it stuck?" is unanswerable. Re-pushing the ack line
     // with an elapsed timer updates the SAME message - no extra bubbles.
-    const keepaliveMs = this.config.codex.showAck ? Number(this.config.codex.keepaliveMs) || 0 : 0;
+    // With streaming deltas the answer itself proves the run is alive, and
+    // appending a timer to the same bubble would leave that line in the final
+    // text (WeCom streamed messages may only grow). Keep it for exec mode.
+    const streaming = this.config.codex.transport === 'app-server' && this.config.codex.streamDeltas;
+    const keepaliveMs = this.config.codex.showAck && !streaming
+      ? Number(this.config.codex.keepaliveMs) || 0
+      : 0;
     const keepaliveTimer = keepaliveMs > 0
       ? setInterval(() => {
         stream
@@ -350,9 +356,11 @@ export class Bridge {
         `[bridge] run finished · ${userId} · ${formatDuration(elapsed)} · `
         + `session ${sessionId ?? '(unknown)'} · ${result.events} events`,
       );
-      await stream.finish(
-        `${result.text || '(Codex 没有返回文本内容)'}\n\n---\n\`${workspace.label}\` · ${formatDuration(elapsed)}`,
-      );
+      const body = `${result.text || '(Codex 没有返回文本内容)'}\n\n---\n\`${workspace.label}\` · ${formatDuration(elapsed)}`;
+      // Once deltas were streamed, the bubble already shows the ack header and
+      // the partial answer. WeCom can only grow a streamed message, so keep
+      // that prefix instead of replacing it with a shorter, header-less text.
+      await stream.finish(firstDeltaAt === null ? body : `${ack}\n\n${body}`);
     } catch (err) {
       const aborted = abort.signal.aborted;
       this.logger.error(
