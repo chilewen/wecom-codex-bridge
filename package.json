@@ -1,0 +1,20 @@
+{
+  "name": "wecom-codex-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Bridge WeCom (WeChat Work) robot callbacks to the Codex CLI, with per-user project selection.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/longconn-main.js",
+    "start:callback": "node src/server.js",
+    "chat": "node scripts/chat.js",
+    "selftest": "node scripts/selftest.js",
+    "simulate": "node scripts/simulate.js"
+    ,"simulate:longconn": "node scripts/simulate-longconn.js"
+    ,"diagnose": "node scripts/diagnose.js"
+    ,"probe": "node scripts/ws-probe.js"
+  }
+}

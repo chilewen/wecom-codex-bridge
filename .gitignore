@@ -1,0 +1,4 @@
+# Contains the bot Secret - never commit it.
+config.json
+data/
+node_modules/

@@ -1,0 +1,61 @@
+{
+  "server": {
+    "host": "127.0.0.1",
+    "port": 8787,
+    "path": "/wecom/callback"
+  },
+  "wecom": {
+    "mode": "longconn",
+    "longconn": {
+      "wsUrl": "wss://openws.work.weixin.qq.com",
+      "botId": "PASTE_YOUR_BOT_ID",
+      "secret": "PASTE_YOUR_BOT_SECRET",
+      "heartbeatMs": 30000
+    },
+    "token": "",
+    "encodingAESKey": "",
+    "corpId": "",
+    "receiveId": "",
+    "strictReceiveId": false,
+    "replyMode": "webhook",
+    "webhookUrl": "",
+    "app": {
+      "corpId": "",
+      "corpSecret": "",
+      "agentId": ""
+    }
+  },
+  "codex": {
+    "bin": "codex",
+    "codexHome": "",
+    "sandbox": "workspace-write",
+    "model": "",
+    "transport": "app-server",
+    "streamDeltas": true,
+    "reasoningEffort": "",
+    "extraArgs": [],
+    "timeoutMs": 1800000,
+    "streamProgress": false,
+    "progressThrottleMs": 4000,
+    "bypassApprovalsAndSandbox": false,
+    "scratchDir": "",
+    "showAck": true,
+    "keepaliveMs": 60000,
+    "networkAccess": false
+  },
+  "projects": {
+    "source": "codex",
+    "codexStateFile": "",
+    "roots": [],
+    "list": [],
+    "scanDepth": 3
+  },
+  "security": {
+    "allowedUsers": []
+  },
+  "limits": {
+    "maxConcurrentRuns": 2,
+    "maxPromptChars": 8000
+  },
+  "stateFile": "data/state.json"
+}

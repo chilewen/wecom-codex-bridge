@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.wecom.codex-bridge</string>
+
+  <!-- Adjust these three paths before installing. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/PATH/TO/node</string>
+    <string>/PATH/TO/wecom-codex-bridge/src/longconn-main.js</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/PATH/TO/wecom-codex-bridge</string>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/tmp/wecom-codex-bridge.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/wecom-codex-bridge.log</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <!-- `codex` lives next to node only if you installed it that way; make sure
+         the daemon can find both node and codex. -->
+    <key>PATH</key>
+    <string>/PATH/TO/node/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+</dict>
+</plist>
