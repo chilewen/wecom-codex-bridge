@@ -12,6 +12,7 @@ import { LongConnClient } from './longconn.js';
 import { attachLongConnBot } from './longconn-bot.js';
 import { createLongConnTransport } from './transport.js';
 import { resolveCodexBin } from './bin-resolver.js';
+import { warmUpAppServer } from './appserver.js';
 
 const config = loadConfig(process.env.BRIDGE_CONFIG);
 
@@ -57,6 +58,12 @@ try {
   console.error(`  codex bin : NOT FOUND\n${err.message}`);
 }
 console.log(`  network   : ${config.codex.networkAccess ? 'ON  (codex 可以联网)' : 'off (沙箱禁网)'}`);
+
+// Pay app-server startup while WeCom is still connecting, so the first user
+// message does not pay it too (the model's first token still dominates).
+warmUpAppServer(config).catch((err) => {
+  console.error(`[appserver] warmup failed (will retry on the first message): ${err.message}`);
+});
 
 client.connect();
 

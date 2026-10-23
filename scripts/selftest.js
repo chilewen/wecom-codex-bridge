@@ -29,6 +29,7 @@ import { DEFAULTS, mergeConfig } from '../src/config.js';
 import { acceptKeyFor, encodeFrame, createFrameParser, MiniWebSocket, OPCODE } from '../src/ws-client.js';
 import { extractMessageText } from '../src/longconn.js';
 import { attachLongConnBot } from '../src/longconn-bot.js';
+import { warmUpAppServer } from '../src/appserver.js';
 
 const TOKEN = 'test-token-1234567890';
 const AES_KEY = crypto.randomBytes(32).toString('base64').replace(/=+$/, '');
@@ -495,6 +496,11 @@ test('resolveCodexBin resolves a bare name that IS on PATH', () => {
   const resolved = resolveCodexBin({ codex: { bin: 'codex' } }, { PATH: dir });
   assert.equal(resolved.bin, fake);
   assert.equal(resolved.source, 'path');
+});
+
+test('app-server warmup is a no-op in exec mode', async () => {
+  const logger = { log() {}, error() {} };
+  assert.equal(await warmUpAppServer({ codex: { transport: 'exec' } }, logger), null);
 });
 
 test('resolveCodexBin revalidates a cached path that disappeared', () => {

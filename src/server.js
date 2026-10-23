@@ -8,6 +8,7 @@ import { Bridge } from './bot.js';
 import { createRequestHandler } from './app.js';
 import { resolveCodexBin } from './bin-resolver.js';
 import { createWebhookTransport } from './transport.js';
+import { warmUpAppServer } from './appserver.js';
 
 const config = loadConfig(process.env.BRIDGE_CONFIG);
 
@@ -23,6 +24,10 @@ const messenger = config.wecom.replyMode === 'webhook' ? null : new AppMessenger
 const transport = createWebhookTransport({ config, messenger });
 const bridge = new Bridge({ config, store, projects, transport });
 const handler = createRequestHandler({ config, bridge, projects });
+
+warmUpAppServer(config).catch((err) => {
+  console.error(`[appserver] warmup failed (will retry on the first message): ${err.message}`);
+});
 
 const server = http.createServer(handler);
 

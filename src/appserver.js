@@ -26,6 +26,7 @@ class AppServerClient {
   constructor({ bin, codexHome, logger }) {
     this.bin = bin;
     this.logger = logger;
+    this.spawnedAt = Date.now();
     this.pending = new Map();
     this.turns = new Map();
     this.nextId = 1;
@@ -50,7 +51,10 @@ class AppServerClient {
     const ready = this.request('initialize', {
       clientInfo: { name: 'wecom-codex-bridge', title: 'WeCom Codex Bridge', version: '0.1.0' },
       capabilities: null,
-    }, CONTROL_TIMEOUT_MS).catch((err) => {
+    }, CONTROL_TIMEOUT_MS).then((result) => {
+      this.logger?.log?.(`[appserver] ready in ${Date.now() - this.spawnedAt}ms (pid ${this.child.pid})`);
+      return result;
+    }).catch((err) => {
       this.markDead(err.message);
       throw new AppServerUnavailableError(err.message);
     });
@@ -323,6 +327,7 @@ export class AppServerRunner {
 
     let threadId = sessionId;
     if (threadId) {
+      const resumeStartedAt = Date.now();
       try {
         await client.request('thread/resume', {
           threadId,
@@ -331,6 +336,7 @@ export class AppServerRunner {
           sandbox: this.sandbox,
           config: this.threadConfig,
         });
+        this.logger?.log?.(`[appserver] resumed thread ${threadId} in ${Date.now() - resumeStartedAt}ms`);
       } catch (err) {
         this.logger?.error?.(`[appserver] could not resume ${threadId}: ${err.message}; starting a new thread`);
         threadId = null;
@@ -338,6 +344,7 @@ export class AppServerRunner {
     }
 
     if (!threadId) {
+      const startedAt = Date.now();
       const started = await client.request('thread/start', {
         cwd,
         approvalPolicy: this.approvalPolicy,
@@ -346,6 +353,7 @@ export class AppServerRunner {
       });
       threadId = started?.thread?.id;
       if (!threadId) throw new Error('app-server did not return a thread id');
+      this.logger?.log?.(`[appserver] started thread ${threadId} in ${Date.now() - startedAt}ms`);
     }
 
     return client.runTurn({
@@ -357,6 +365,17 @@ export class AppServerRunner {
       signal,
       timeoutMs: timeoutMs ?? this.config.codex.timeoutMs,
     });
+  }
+
+  /**
+   * Pay the process-spawn and protocol-handshake cost at bridge startup instead
+   * of on the first user message. This is small (~100ms) but it also lets the
+   * app-server load plugins/skills while the WeCom connection is still linking.
+   */
+  async warmup() {
+    const client = this.ensureClient();
+    await client.ready;
+    return Date.now() - client.spawnedAt;
   }
 
   stop() {
@@ -380,6 +399,21 @@ export function getAppServerRunner(config, logger = console) {
     runners.set(key, runner);
   }
   return runner;
+}
+
+/**
+ * Starts the app-server ahead of the first turn. No-ops for `exec` mode. Start
+ * failures are propagated so callers can log them; the next real turn retries
+ * lazily, so a failed warmup does not take the bridge down.
+ */
+export async function warmUpAppServer(config, logger = console) {
+  if ((config.codex.transport ?? 'exec') !== 'app-server') return null;
+  const startedAt = Date.now();
+  const runner = getAppServerRunner(config, logger);
+  await runner.warmup();
+  const elapsed = Date.now() - startedAt;
+  logger.log?.(`[appserver] warmup complete in ${elapsed}ms; first message skips process startup`);
+  return elapsed;
 }
 
 export function stopAppServers() {
